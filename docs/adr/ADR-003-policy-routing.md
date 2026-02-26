@@ -122,6 +122,27 @@ async def run(self, context: WorkflowContext) -> WorkflowResult:
 **Mitigation:** Every workflow logs the full `ExecutionPolicy` it used in the workflow event log.
 `GET /workflows/{run_id}/policy` endpoint for debugging.
 
+## Future Consideration: Dynamic Skill Selection for Skills Marketplace
+
+Currently, PolicyEngine routes to AI skills via hardcoded adapter names (e.g. `adapters/openclaw`
+with a fixed skill identifier). This is sufficient while skills are internal and static.
+
+When a skills marketplace is introduced, skill selection must become **dynamic**:
+- Users will hold per-skill licenses (purchased or subscribed)
+- PolicyEngine will need to query "which skill versions is this user licensed to run?"
+- Skill routing will depend on runtime entitlements, not just subscription tier
+
+**Design guidance for implementers:**
+- Do not hardcode skill identifiers inside workflow code — pass them through `ExecutionPolicy`
+  so the routing decision stays in PolicyEngine
+- Keep the `get_policy()` interface open to receiving skill-related hints from callers
+- When skills marketplace is designed, plan for a `PolicyEngine → SkillsMarketplace` read
+  dependency (policy queries skill entitlements at resolution time); this is the one
+  cross-domain read that cannot be avoided
+
+This does not require any changes now. Record this note so the `get_policy()` interface
+is not designed in a way that makes the extension unnecessarily difficult.
+
 ## Related
 
 - [ADR-001](ADR-001-ddd-lite-workflow-first.md) — why policy is in platform/, not domains/
