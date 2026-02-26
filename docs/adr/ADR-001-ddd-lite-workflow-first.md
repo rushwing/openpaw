@@ -32,6 +32,7 @@ Apply DDD patterns **only** to these bounded contexts:
 | `identity` | User, Subscription, Entitlement, CreditWallet |
 | `asset_registry` | Problem, SolutionAsset, VideoAsset, AssetVersion, ProvenanceRecord |
 | `rewards_ledger` | LedgerAccount, LedgerEntry |
+| `feedback` | Proposal, ValidationRun, Decision, Publication, Rating |
 | `reputation` | ReputationProfile, ReputationEvent |
 | `marketplace` | Bounty, ExpertProfile, Submission, EscrowAccount |
 

@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft — Phase 1 (implement before first production deployment)
+Accepted — Phase 0 (design decision); Phase 1 (implementation required before first deployment)
 
 ## Context
 

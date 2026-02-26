@@ -21,7 +21,7 @@ Community earns rewards for corrections/ratings. Expert bounty marketplace.
 | [ADR-002](docs/adr/ADR-002-asset-as-sot-ledger.md) | Asset is Source of Truth; Rewards Ledger is append-only forever |
 | [ADR-003](docs/adr/ADR-003-policy-routing.md) | PolicyEngine controls model selection, cost caps, local/cloud routing |
 
-**Stable → DDD-lite:** `identity` · `asset_registry` · `rewards_ledger` · `reputation` · `marketplace`
+**Stable → DDD-lite:** `identity` · `asset_registry` · `rewards_ledger` · `feedback` · `reputation` · `marketplace`
 
 **Volatile → Workflow-first:** `retrieve_or_generate` · `solve_workflow` · `video_workflow` ·
 `correction_validation` · `reward_settlement` · `bounty_fulfillment`
