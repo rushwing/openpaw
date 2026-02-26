@@ -1,0 +1,446 @@
+{
+  "spec_format": "openpaw:event_spec:v0",
+  "status": "phase0_locked",
+  "status_note": "phase0_locked = changes allowed before Phase 1 milestone but require team discussion. After Phase 1 kick-off, breaking changes require a new version (v1) and ADR.",
+  "validation_note": "This file is a human-readable event spec. Pydantic models for programmatic validation live in platform/contracts/validators.py. Do NOT use this file directly as a JSON Schema.",
+  "last_updated": "phase-0",
+
+  "envelope": {
+    "description": "All events must be wrapped in this envelope",
+    "fields": {
+      "event_id":         "string (uuid) — unique ID for this event occurrence",
+      "event_type":       "string — dot-separated: domain.EventName (e.g. asset.AssetVersionCreated)",
+      "causation_id":     "string (uuid) | null — ID of the command/event that caused this",
+      "correlation_id":   "string (uuid) — traces a user request end-to-end across all services",
+      "tenant_id":        "string — required; used for data isolation",
+      "user_id":          "string (uuid) | null — actor user, if applicable",
+      "origin_node":      "string — 'cloud' for cloud-generated events, or device_id (e.g. 'pi-node-abc123') for edge-generated events. Used by sync mechanism to prevent echo loops.",
+      "occurred_at":      "string (ISO 8601) — when the event occurred (not persisted time)",
+      "schema_version":   "string — always 'v0' for this file",
+      "payload":          "object — event-specific fields (see events below)"
+    }
+  },
+
+  "namespace_map": {
+    "identity":        "User registration, subscription, entitlement/quota management",
+    "ingestion":       "Media upload, normalization, OCR, dedup hashing",
+    "retrieval":       "Vector search, cache hits/misses, index maintenance",
+    "generation":      "Async job lifecycle (solve, video, index jobs)",
+    "asset":           "Problem registration, solution/video versioning, provenance",
+    "rewards_ledger":  "Append-only points ledger — all earn/deduct facts",
+    "feedback":        "Ratings, correction proposals, reward grants (triggers ledger)",
+    "reputation":      "Expert score and level changes",
+    "marketplace":     "Bounty lifecycle",
+    "workflow":        "Workflow run lifecycle (cross-cutting observability)",
+    "sync":            "Edge-to-Cloud and Cloud-to-Edge asset synchronization"
+  },
+
+  "events": {
+
+    "identity.UserRegistered": {
+      "description": "New user completed registration",
+      "payload": {
+        "user_id":             "string (uuid)",
+        "email":               "string",
+        "registration_method": "enum: app | telegram | web",
+        "subscription_tier":   "enum: free | pro | enterprise",
+        "locale":              "string (BCP-47, e.g. zh-CN)"
+      }
+    },
+
+    "identity.SubscriptionActivated": {
+      "description": "User's subscription plan was activated or upgraded. NOTE: does NOT directly credit the ledger — triggers rewards_ledger.PointsEarned via reward_settlement workflow.",
+      "payload": {
+        "user_id":             "string (uuid)",
+        "plan_id":             "string",
+        "tier":                "enum: free | pro | enterprise",
+        "monthly_quota_points":"integer — generation quota included in this plan",
+        "expires_at":          "string (ISO 8601) | null"
+      }
+    },
+
+    "identity.DeviceLinked": {
+      "description": "A device (e.g. Raspberry Pi) was linked to a user account for local mode",
+      "payload": {
+        "user_id":             "string (uuid)",
+        "device_id":           "string (uuid)",
+        "device_type":         "enum: raspberry_pi | desktop | server",
+        "local_only_mode":     "boolean"
+      }
+    },
+
+    "ingestion.UploadSessionCreated": {
+      "description": "Pre-signed upload URL was created for direct client-to-storage upload",
+      "payload": {
+        "upload_session_id":   "string (uuid)",
+        "presigned_url":       "string — client uploads directly here (expires in 5 min)",
+        "storage_key":         "string — final object key after upload",
+        "expires_at":          "string (ISO 8601)"
+      }
+    },
+
+    "ingestion.MediaUploaded": {
+      "description": "Client confirmed upload completion (or Telegram sent a file)",
+      "payload": {
+        "upload_session_id":   "string (uuid)",
+        "media_type":          "enum: image | video | text | url",
+        "size_bytes":          "integer",
+        "storage_key":         "string — object storage path",
+        "content_hash_sha256": "string"
+      }
+    },
+
+    "ingestion.MediaNormalized": {
+      "description": "Media processed: hashed, OCR'd, thumbnailed, topic-tagged, ProblemSignature computed",
+      "payload": {
+        "upload_session_id":   "string (uuid)",
+        "media_object_id":     "string (uuid)",
+        "phash":               "string | null — perceptual hash (images only)",
+        "ocr_text":            "string | null — raw OCR output",
+        "normalized_text":     "string | null — lowercased, whitespace-normalized",
+        "thumbnail_key":       "string | null",
+        "topic_tags":          "array of string",
+        "problem_signature":   "string | null — dedup key used for retrieval"
+      }
+    },
+
+    "ingestion.MediaRejected": {
+      "description": "Media failed validation (safety, format, size, OCR quality)",
+      "payload": {
+        "upload_session_id":   "string (uuid)",
+        "reason":              "enum: unsafe_content | unsupported_format | too_large | ocr_failed | low_quality",
+        "detail":              "string | null"
+      }
+    },
+
+    "retrieval.RetrievalHit": {
+      "description": "Search found an existing published asset with confidence >= policy.retrieval_threshold",
+      "payload": {
+        "workflow_run_id":     "string (uuid)",
+        "problem_signature":   "string",
+        "asset_version_id":    "string (uuid)",
+        "confidence_score":    "float (0.0–1.0)",
+        "retrieval_method":    "enum: exact_hash | phash | vector | hybrid"
+      }
+    },
+
+    "retrieval.RetrievalMiss": {
+      "description": "No existing asset found above threshold; generation will proceed",
+      "payload": {
+        "workflow_run_id":     "string (uuid)",
+        "problem_signature":   "string",
+        "top_candidates":      "array of {asset_version_id: string, confidence_score: float} — near-misses for logging"
+      }
+    },
+
+    "retrieval.DocumentIndexed": {
+      "description": "Asset version was embedded and indexed in Qdrant",
+      "payload": {
+        "asset_version_id":    "string (uuid)",
+        "problem_signature":   "string",
+        "qdrant_point_id":     "string",
+        "embedding_model":     "string",
+        "index_version":       "string"
+      }
+    },
+
+    "generation.JobCreated": {
+      "description": "A generation job was queued (solve, video, or index)",
+      "payload": {
+        "job_id":              "string (uuid)",
+        "job_type":            "enum: solve | video | index",
+        "workflow_run_id":     "string (uuid)",
+        "problem_signature":   "string",
+        "policy_snapshot":     "object — ExecutionPolicy used for this job",
+        "idempotency_key":     "string"
+      }
+    },
+
+    "generation.JobSucceeded": {
+      "description": "Generation job completed successfully",
+      "payload": {
+        "job_id":              "string (uuid)",
+        "job_type":            "enum: solve | video | index",
+        "output_asset_version_id": "string (uuid)",
+        "cost_usd":            "float",
+        "duration_ms":         "integer",
+        "model_used":          "string"
+      }
+    },
+
+    "generation.JobFailed": {
+      "description": "Generation job failed after all retries",
+      "payload": {
+        "job_id":              "string (uuid)",
+        "job_type":            "enum: solve | video | index",
+        "error_code":          "string — see docs/naming-conventions.md#error-codes",
+        "error_detail":        "string",
+        "retry_count":         "integer",
+        "cost_usd_incurred":   "float — cost already spent before failure"
+      }
+    },
+
+    "asset.ProblemRegistered": {
+      "description": "A new Problem entity was created for a previously unseen ProblemSignature",
+      "payload": {
+        "problem_id":          "string (uuid)",
+        "problem_signature":   "string",
+        "normalized_text":     "string | null",
+        "topic_tags":          "array of string",
+        "source_media_object_id": "string (uuid)"
+      }
+    },
+
+    "asset.AssetVersionCreated": {
+      "description": "A new AssetVersion was created (covers: first generation, user correction, expert answer, model re-generation)",
+      "payload": {
+        "problem_id":          "string (uuid)",
+        "problem_signature":   "string",
+        "asset_version_id":    "string (uuid)",
+        "version_number":      "integer — monotonically increasing per (problem_id, asset_type)",
+        "asset_type":          "enum: solution_html | video",
+        "storage_key":         "string",
+        "content_status":      "enum: ready | processing | failed — 'ready' means content is available; 'processing' means background job is running (e.g. video render); 'failed' means generation failed",
+        "embedding_model":     "string | null — embedding model used to index this version (must match system-wide embedding_model config; see ADR-005)",
+        "provenance": {
+          "created_by_type":   "enum: ai_generation | user_correction | expert_answer | system_migration",
+          "model_id":          "string | null — e.g. claude-sonnet-4-6",
+          "skill_name":        "string | null — e.g. openclaw:photo-solve",
+          "prompt_version":    "string | null — hash of prompt template",
+          "user_id":           "string (uuid) | null",
+          "correction_proposal_id": "string (uuid) | null"
+        }
+      }
+    },
+
+    "asset.AssetVideoReady": {
+      "description": "Background video generation completed; the video AssetVersion content_status changed from 'processing' to 'ready'. Frontend should update UX to show video available.",
+      "payload": {
+        "problem_id":          "string (uuid)",
+        "asset_version_id":    "string (uuid) — the video AssetVersion that is now ready",
+        "problem_signature":   "string",
+        "duration_sec":        "float — video duration"
+      }
+    },
+
+    "asset.AssetVersionPublished": {
+      "description": "An asset version was promoted to 'published' (active) status",
+      "payload": {
+        "problem_id":          "string (uuid)",
+        "asset_version_id":    "string (uuid)",
+        "asset_type":          "enum: solution_html | video",
+        "previous_version_id": "string (uuid) | null",
+        "published_by":        "enum: system | user | admin"
+      }
+    },
+
+    "asset.AssetDeprecated": {
+      "description": "An asset version was deprecated (assets are NEVER deleted)",
+      "payload": {
+        "asset_version_id":    "string (uuid)",
+        "reason":              "string",
+        "deprecated_by":       "enum: system | user | admin"
+      }
+    },
+
+    "feedback.RatingSubmitted": {
+      "description": "User submitted a quality rating for a solution or video",
+      "payload": {
+        "rating_id":           "string (uuid)",
+        "asset_version_id":    "string (uuid)",
+        "rating_type":         "enum: helpful | correct | video_quality",
+        "score":               "integer (1–5)"
+      }
+    },
+
+    "feedback.CorrectionProposed": {
+      "description": "User submitted a correction (HTML patch or video replacement)",
+      "payload": {
+        "proposal_id":         "string (uuid)",
+        "asset_version_id":    "string (uuid)",
+        "proposal_type":       "enum: html_patch | video_replacement | expert_answer",
+        "content_storage_key": "string",
+        "submitter_user_id":   "string (uuid)",
+        "explanation":         "string | null"
+      }
+    },
+
+    "feedback.CorrectionAccepted": {
+      "description": "Correction was validated and accepted; a new AssetVersion was created. This event triggers rewards_ledger.PointsEarned via reward_settlement workflow.",
+      "payload": {
+        "proposal_id":         "string (uuid)",
+        "new_asset_version_id":"string (uuid)",
+        "validation_method":   "enum: ai_auto | ai_human_fallback | admin",
+        "submitter_user_id":   "string (uuid)",
+        "reward_points":       "integer — points to be awarded (computed by reward policy)"
+      }
+    },
+
+    "feedback.CorrectionRejected": {
+      "description": "Correction was validated and rejected",
+      "payload": {
+        "proposal_id":         "string (uuid)",
+        "validation_method":   "enum: ai_auto | ai_human_fallback | admin",
+        "rejection_reason":    "string"
+      }
+    },
+
+    "rewards_ledger.PointsEarned": {
+      "description": "Points were credited to a user's ledger account. This is the AUTHORITATIVE event for credit grants — use this (not identity.*) for all points bookkeeping.",
+      "payload": {
+        "ledger_entry_id":     "string (uuid)",
+        "account_id":          "string (uuid) — references ledger_accounts.id",
+        "amount":              "integer (positive)",
+        "entry_type":          "enum: subscription_grant | correction_reward | rating_reward | bounty_reward | topup | referral | admin_grant",
+        "source_event_id":     "string (uuid) — ID of the event that triggered this credit",
+        "idempotency_key":     "string — format: 'earn:{entry_type}:{source_event_id}:{account_id}'"
+      }
+    },
+
+    "rewards_ledger.PointsDeducted": {
+      "description": "Points were debited from a user's ledger account. Pre-check: balance must be >= amount before emitting.",
+      "payload": {
+        "ledger_entry_id":     "string (uuid)",
+        "account_id":          "string (uuid)",
+        "amount":              "integer (positive — stored as negative in ledger)",
+        "entry_type":          "enum: generation_cost | bounty_escrow | bounty_posted",
+        "source_event_id":     "string (uuid)",
+        "idempotency_key":     "string — format: 'deduct:{entry_type}:{source_event_id}:{account_id}'"
+      }
+    },
+
+    "reputation.ReputationUpdated": {
+      "description": "User's reputation score or expert level changed in a domain",
+      "payload": {
+        "user_id":             "string (uuid)",
+        "domain_tag":          "string — e.g. 'math.calculus', 'algo.dp'",
+        "previous_score":      "float",
+        "new_score":           "float",
+        "level_changed":       "boolean",
+        "new_level":           "string | null — e.g. 'Contributor', 'Expert', 'Master'"
+      }
+    },
+
+    "marketplace.BountyPosted": {
+      "description": "User posted a bounty question; escrow deducted via rewards_ledger.PointsDeducted",
+      "payload": {
+        "bounty_id":           "string (uuid)",
+        "poster_user_id":      "string (uuid)",
+        "problem_signature":   "string",
+        "domain_tags":         "array of string",
+        "escrow_amount":       "integer",
+        "expires_at":          "string (ISO 8601)"
+      }
+    },
+
+    "marketplace.SubmissionDelivered": {
+      "description": "Expert delivered an answer to a bounty question",
+      "payload": {
+        "submission_id":       "string (uuid)",
+        "bounty_id":           "string (uuid)",
+        "expert_user_id":      "string (uuid)",
+        "answer_type":         "enum: solution_html | video | text"
+      }
+    },
+
+    "marketplace.BountySettled": {
+      "description": "Bounty fulfilled; escrow released to expert via rewards_ledger.PointsEarned",
+      "payload": {
+        "bounty_id":           "string (uuid)",
+        "winner_user_id":      "string (uuid)",
+        "submission_id":       "string (uuid)",
+        "payout_amount":       "integer",
+        "settlement_method":   "enum: accepted_by_poster | ai_validated | admin_decision"
+      }
+    },
+
+    "marketplace.BountyExpired": {
+      "description": "Bounty expired with no accepted submission; escrow returned to poster",
+      "payload": {
+        "bounty_id":           "string (uuid)",
+        "poster_user_id":      "string (uuid)",
+        "refund_amount":       "integer"
+      }
+    },
+
+    "workflow.WorkflowStarted": {
+      "description": "A workflow run was initiated (cross-cutting observability event, not a domain event)",
+      "payload": {
+        "workflow_run_id":     "string (uuid)",
+        "workflow_type":       "string",
+        "attempt_no":          "integer",
+        "triggered_by":        "enum: api | telegram | scheduler | workflow",
+        "idempotency_key":     "string"
+      }
+    },
+
+    "workflow.WorkflowSucceeded": {
+      "description": "A workflow run completed successfully",
+      "payload": {
+        "workflow_run_id":     "string (uuid)",
+        "workflow_type":       "string",
+        "attempt_no":          "integer",
+        "outcome":             "string — business outcome (e.g. 'hit', 'new', 'accepted')",
+        "duration_ms":         "integer",
+        "cost_usd":            "float"
+      }
+    },
+
+    "workflow.WorkflowFailed": {
+      "description": "A workflow run failed after all retries or due to unrecoverable error",
+      "payload": {
+        "workflow_run_id":     "string (uuid)",
+        "workflow_type":       "string",
+        "attempt_no":          "integer",
+        "failed_step":         "string",
+        "error_code":          "string — see docs/naming-conventions.md#error-codes",
+        "error_detail":        "string",
+        "retries_exhausted":   "boolean"
+      }
+    },
+
+    "sync.AssetSyncRequested": {
+      "description": "Edge node (Pi) requests to sync a locally-generated asset to the cloud. Only emitted when user explicitly consents to publish (privacy_mode=false or explicit publish action). See ADR-005.",
+      "payload": {
+        "device_id":              "string — the Pi device requesting sync",
+        "local_asset_version_id": "string (uuid) — local ID on the Pi",
+        "problem_signature":      "string",
+        "asset_type":             "enum: solution_html | video",
+        "storage_key":            "string — local storage key; cloud sync agent will pull from here",
+        "user_consent_ref":       "string — reference to the explicit publish consent action (audit trail)"
+      }
+    },
+
+    "sync.AssetUplinked": {
+      "description": "A locally-generated asset was successfully synced to the cloud and registered with a cloud asset_version_id. Emitted by the cloud sync agent after successful upload.",
+      "payload": {
+        "device_id":              "string",
+        "local_asset_version_id": "string (uuid) — original ID on the Pi",
+        "cloud_asset_version_id": "string (uuid) — new ID assigned in cloud asset registry",
+        "problem_signature":      "string",
+        "asset_type":             "enum: solution_html | video"
+      }
+    },
+
+    "sync.AssetDownlinked": {
+      "description": "Cloud pushed an updated asset (e.g. expert correction) to an edge node. Edge node confirms receipt.",
+      "payload": {
+        "device_id":              "string",
+        "cloud_asset_version_id": "string (uuid)",
+        "local_asset_version_id": "string (uuid) — stored locally on Pi after sync",
+        "problem_signature":      "string",
+        "asset_type":             "enum: solution_html | video"
+      }
+    },
+
+    "sync.EmbeddingModelMismatch": {
+      "description": "CRITICAL alert: edge node reports using a different embedding_model than cloud. All retrieval from this node will be unreliable until re-indexed. See ADR-005.",
+      "payload": {
+        "device_id":              "string",
+        "edge_embedding_model":   "string — what the Pi is currently using",
+        "cloud_embedding_model":  "string — what the cloud requires",
+        "affected_index_count":   "integer — number of Qdrant points that need re-indexing"
+      }
+    }
+  }
+}

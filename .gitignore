@@ -205,3 +205,29 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# IDE
+.idea/
+.vscode/
+
+# Secrets / credentials
+secrets/
+*.secret
+.env.local
+.env.*.local
+
+# Local launch scripts
+minimax_claude_launch.sh
+
+# Local dev data volumes
+data/minio/
+data/qdrant/
+data/postgres/
+
+# Docker local overrides
+docker-compose.override.yml

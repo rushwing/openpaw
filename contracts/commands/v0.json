@@ -1,0 +1,131 @@
+{
+  "spec_format": "openpaw:command_spec:v0",
+  "status": "phase0_locked",
+  "status_note": "phase0_locked = changes allowed before Phase 1 milestone but require team discussion. After Phase 1 kick-off, breaking changes require a new version (v1) and ADR.",
+  "validation_note": "Human-readable command spec. Pydantic models in platform/contracts/validators.py for programmatic validation.",
+
+  "command_envelope": {
+    "description": "All commands must be wrapped in this envelope",
+    "fields": {
+      "command_id":       "string (uuid) — unique ID for this command",
+      "command_type":     "string — dot-separated: domain.CommandName",
+      "correlation_id":   "string (uuid) — traces request end-to-end",
+      "tenant_id":        "string",
+      "issued_by":        "string (uuid) — user_id",
+      "issued_at":        "string (ISO 8601)",
+      "idempotency_key":  "string — caller-provided dedup key",
+      "payload":          "object — command-specific fields (see commands below)"
+    }
+  },
+
+  "commands": {
+
+    "ingestion.CreateUploadSession": {
+      "description": "Step 1 of 2 for image/video upload. Creates a pre-signed URL for direct client-to-storage upload. Returns upload_session_id and presigned_url.",
+      "note": "For text/url submissions, skip this step and use SubmitProblem directly.",
+      "payload": {
+        "media_type":          "enum: image | video",
+        "content_type":        "string — MIME type (e.g. image/jpeg, image/png)",
+        "size_bytes_hint":     "integer — approximate file size (for quota pre-check)"
+      }
+    },
+
+    "ingestion.SubmitProblem": {
+      "description": "Step 2 of 2 for image/video, or step 1 for text/url. Triggers RetrieveOrGenerateWorkflow.",
+      "note": "For image/video: must include upload_session_id after upload completes. For text/url: include text or url field directly.",
+      "payload": {
+        "media_type":          "enum: image | url | text",
+        "upload_session_id":   "string (uuid) | null — required if media_type is 'image'; omit for text/url",
+        "url":                 "string | null — required if media_type is 'url'",
+        "text":                "string | null — required if media_type is 'text'",
+        "intent":              "enum: solve | video | both — default: both",
+        "context_hint":        "string | null — optional user hint (grade level, topic, language)",
+        "privacy_mode":        "boolean — default: false. If true, forces local executor only"
+      }
+    },
+
+    "generation.RetryJob": {
+      "description": "Retry a failed generation job (uses same idempotency_key as original, increments attempt_no).",
+      "payload": {
+        "job_id":              "string (uuid)"
+      }
+    },
+
+    "generation.CancelJob": {
+      "description": "Cancel a pending or running generation job.",
+      "payload": {
+        "job_id":              "string (uuid)",
+        "reason":              "string | null"
+      }
+    },
+
+    "feedback.SubmitRating": {
+      "description": "User rates a solution or video asset version.",
+      "payload": {
+        "asset_version_id":    "string (uuid)",
+        "rating_type":         "enum: helpful | correct | video_quality",
+        "score":               "integer (1–5)"
+      }
+    },
+
+    "feedback.ProposeCorrection": {
+      "description": "User submits a correction to an existing solution. For image corrections: use CreateUploadSession first. For HTML patches: submit the diff as text.",
+      "payload": {
+        "asset_version_id":    "string (uuid)",
+        "proposal_type":       "enum: html_patch | video_replacement",
+        "upload_session_id":   "string (uuid) | null — for video_replacement uploads",
+        "html_patch":          "string | null — unified diff for html_patch proposals",
+        "explanation":         "string | null — why is this correction needed?"
+      }
+    },
+
+    "marketplace.PostBounty": {
+      "description": "User posts a bounty question. Step 1: upload image via CreateUploadSession if needed. Step 2: post bounty with upload_session_id or text.",
+      "payload": {
+        "media_type":          "enum: image | url | text",
+        "upload_session_id":   "string (uuid) | null",
+        "url":                 "string | null",
+        "text":                "string | null",
+        "domain_tags":         "array of string — topic areas for expert matching",
+        "escrow_amount":       "integer — points to escrow (deducted from wallet)",
+        "expires_in_hours":    "integer (1–168) — default: 48",
+        "description":         "string | null — additional context for experts"
+      }
+    },
+
+    "marketplace.SubmitBountyAnswer": {
+      "description": "Expert submits an answer to a bounty. For video/HTML uploads: use CreateUploadSession first.",
+      "payload": {
+        "bounty_id":           "string (uuid)",
+        "answer_type":         "enum: solution_html | video | text",
+        "upload_session_id":   "string (uuid) | null",
+        "text_answer":         "string | null",
+        "explanation":         "string | null"
+      }
+    },
+
+    "marketplace.AcceptBountySubmission": {
+      "description": "Bounty poster accepts a submission as the winning answer. Triggers BountyFulfillmentWorkflow.",
+      "payload": {
+        "bounty_id":           "string (uuid)",
+        "submission_id":       "string (uuid)"
+      }
+    },
+
+    "admin.ReindexAsset": {
+      "description": "Re-embed and re-index an asset version (e.g. after embedding model upgrade).",
+      "payload": {
+        "asset_version_id":    "string (uuid)",
+        "reason":              "enum: model_upgrade | manual | corruption_fix"
+      }
+    },
+
+    "admin.DeprecateAsset": {
+      "description": "Mark an asset version as deprecated (never deleted).",
+      "payload": {
+        "asset_version_id":    "string (uuid)",
+        "reason":              "string"
+      }
+    }
+  }
+}

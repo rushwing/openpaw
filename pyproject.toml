@@ -1,0 +1,87 @@
+[project]
+name = "openpaw"
+version = "0.1.0"
+description = "Agentic AI platform for educational problem-solving"
+requires-python = ">=3.12"
+dependencies = [
+    # API
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "python-multipart>=0.0.12",
+
+    # Database
+    "asyncpg>=0.30",
+    "sqlalchemy[asyncio]>=2.0",
+
+    # Cache / Queue
+    "redis[hiredis]>=5.2",
+
+    # Vector DB
+    "qdrant-client>=1.12",
+
+    # LLM providers
+    "anthropic>=0.40",
+    "openai>=1.55",
+    "google-generativeai>=0.8",
+
+    # Telegram bot
+    "python-telegram-bot>=21.0",
+
+    # Object storage
+    "minio>=7.2",
+    "boto3>=1.35",  # for Aliyun OSS (S3-compatible)
+
+    # Image processing / OCR
+    "pillow>=11.0",
+    "imagehash>=4.3",  # perceptual hash
+
+    # Utilities
+    "httpx>=0.28",
+    "structlog>=24.4",
+    "tenacity>=9.0",
+    "python-jose[cryptography]>=3.3",
+    "passlib[bcrypt]>=1.7",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "testcontainers[postgres,redis]>=4.8",
+    "httpx>=0.28",
+    "ruff>=0.8",
+    "mypy>=1.13",
+    "types-redis>=4.6",
+    "types-pillow>=10.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["apps", "domains", "workflows", "adapters", "platform", "contracts"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = []
+
+[tool.ruff.lint.isort]
+known-first-party = ["apps", "domains", "workflows", "adapters", "platform", "contracts"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+ignore_missing_imports = true
